@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TikTok Game</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main>
+    <h1>TikTok Game</h1>
+    <p class="health">Statut du serveur : <span id="health">chargement...</span></p>
+
+    <section id="view-landing" class="view">
+      <h2>Bienvenue</h2>
+      <button id="show-login">J'ai déjà un compte</button>
+      <button id="show-register">Créer un compte</button>
+    </section>
+
+    <section id="view-login" class="view" hidden>
+      <h2>Connexion</h2>
+      <form id="login-form">
+        <input type="email" id="login-email" placeholder="Email" required />
+        <input type="password" id="login-password" placeholder="Mot de passe" required />
+        <button type="submit">Se connecter</button>
+      </form>
+      <p id="login-message"></p>
+      <button type="button" data-back>Retour</button>
+    </section>
+
+    <section id="view-register" class="view" hidden>
+      <h2>Créer un compte</h2>
+      <form id="register-form">
+        <input type="email" id="register-email" placeholder="Email" required />
+        <input
+          type="password"
+          id="register-password"
+          placeholder="Mot de passe (8 caractères min.)"
+          minlength="8"
+          required
+        />
+        <div id="register-dropzone" class="dropzone">
+          <p>Glisse ton export TikTok (zip) ici, ou clique pour choisir un fichier</p>
+          <input type="file" id="register-file" accept=".zip" hidden />
+          <p id="register-filename"></p>
+        </div>
+        <button type="submit">Créer mon compte</button>
+      </form>
+      <p id="register-message"></p>
+      <button type="button" data-back>Retour</button>
+    </section>
+
+    <section id="view-dashboard" class="view" hidden>
+      <h2>Mon compte</h2>
+      <p>Connecté en tant que <strong id="dashboard-email"></strong></p>
+      <p><span id="dashboard-count"></span> vidéos likées importées</p>
+
+      <div id="update-dropzone" class="dropzone">
+        <p>Glisse un nouvel export TikTok ici pour mettre à jour tes données</p>
+        <input type="file" id="update-file" accept=".zip" hidden />
+      </div>
+      <p id="update-message"></p>
+
+      <div id="room-actions">
+        <button type="button" id="create-room-button">Créer une room</button>
+        <form id="join-room-form">
+          <input type="text" id="join-room-code" placeholder="Code de room (ex: KQ36M5)" maxlength="6" />
+          <button type="submit">Rejoindre</button>
+        </form>
+        <p id="room-message"></p>
+      </div>
+
+      <button type="button" id="logout-button">Se déconnecter</button>
+    </section>
+
+    <section id="view-room" class="view" hidden>
+      <h2>Room <span id="room-code-display"></span></h2>
+      <ul id="room-players-list"></ul>
+
+      <div id="room-not-ready-warning" hidden>
+        <p>Tu dois d'abord importer tes données TikTok pour jouer.</p>
+        <button type="button" id="room-go-upload">Importer mes données</button>
+      </div>
+
+      <div id="room-chef-config" hidden>
+        <h3>Configuration</h3>
+        <form id="room-config-form">
+          <label>
+            Nombre de rounds
+            <input type="number" id="config-num-rounds" min="3" max="20" value="10" />
+          </label>
+          <label>
+            Période
+            <select id="config-period-filter">
+              <option value="7d">7 derniers jours</option>
+              <option value="30d">30 derniers jours</option>
+              <option value="all" selected>Tout l'historique</option>
+            </select>
+          </label>
+          <label>
+            Temps par round
+            <select id="config-timer">
+              <option value="">Pas de limite</option>
+              <option value="15">15s</option>
+              <option value="30">30s</option>
+              <option value="60">60s</option>
+            </select>
+          </label>
+          <button type="submit">Mettre à jour la config</button>
+        </form>
+        <button type="button" id="room-start-button">Lancer la partie</button>
+        <p id="room-config-message"></p>
+      </div>
+
+      <div id="room-waiting" hidden>
+        <p>En attente que le chef lance la partie...</p>
+      </div>
+
+      <div id="room-in-progress" hidden>
+        <p>Partie lancée ! (logique de round à venir à l'étape suivante)</p>
+      </div>
+
+      <button type="button" id="room-leave-button">Retour au dashboard</button>
+    </section>
+  </main>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/rooms.js"></script>
+  <script src="/static/js/main.js"></script>
+</body>
+</html>
