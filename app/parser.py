@@ -6,10 +6,10 @@ VIDEO_LINK_RE = re.compile(r"tiktokv?\.com/.*/video/\d+")
 
 
 def parse_export(file_stream):
-    """Parse un export officiel TikTok (zip contenant des JSON).
+    """Parse an official TikTok export (zip containing JSON files).
 
-    Retourne la liste des vidéos likées sous la forme
-    [{"date": str, "link": str}, ...], dédupliquée par lien.
+    Returns the list of liked videos as [{"date": str, "link": str}, ...],
+    deduplicated by link.
     """
     likes = []
     with zipfile.ZipFile(file_stream) as archive:
@@ -33,9 +33,9 @@ def parse_export(file_stream):
 
 
 def _extract_likes(node):
-    # La structure de l'export TikTok varie selon les versions ("Activity" >
-    # "Like List" > "ItemFavoriteList", parfois à un autre niveau), donc on
-    # cherche récursivement la clé plutôt que de fixer un chemin.
+    # The TikTok export structure varies across versions ("Activity" >
+    # "Like List" > "ItemFavoriteList", sometimes at a different depth), so we
+    # search for the key recursively instead of hardcoding a fixed path.
     found = []
     if isinstance(node, dict):
         item_list = node.get("ItemFavoriteList")

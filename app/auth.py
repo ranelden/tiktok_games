@@ -6,6 +6,22 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import db
 
+# Display name, in-memory only (no DB column): defaults to the email,
+# customizable via /api/username. Must be visible to other players in a room,
+# so it's stored here rather than in the Flask session (which is per-browser
+# and invisible to other players' requests).
+_usernames = {}
+
+
+def get_username(user_id):
+    user = get_user_by_id(user_id)
+    default = user["email"] if user else "?"
+    return _usernames.get(user_id, default)
+
+
+def set_username(user_id, name):
+    _usernames[user_id] = name
+
 
 def create_user(email, password):
     password_hash = generate_password_hash(password)

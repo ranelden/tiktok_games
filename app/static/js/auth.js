@@ -43,3 +43,7 @@ function updateData(file) {
   formData.append("file", file);
   return apiPostForm("/api/upload", formData);
 }
+
+function updateUsername(name) {
+  return apiPostJson("/api/username", { name });
+}

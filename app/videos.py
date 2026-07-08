@@ -1,5 +1,7 @@
+import json
 import logging
 import os
+import zipfile
 from datetime import datetime, timedelta
 
 import db
@@ -7,22 +9,24 @@ import db
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
 logger = logging.getLogger(__name__)
 
-PERIOD_DAYS = {"7d": 7, "30d": 30}
 
+def save_raw_export(user_id, likes):
+    """Save a slimmed-down version of the export (just the already-parsed
+    likes: date + link), not the full TikTok zip with its sections that are
+    irrelevant to the game (favorites, sounds, hashtags...). Overwrites the
+    previous export for the same user.
 
-def save_raw_export(user_id, raw_bytes):
-    """Conserve une copie du zip brut uploadé (écrase l'export précédent du même user).
-
-    Purement une sauvegarde de secours : jamais relue par l'appli. Un échec ici
-    ne doit donc jamais faire échouer l'inscription/upload (déjà en base à ce stade).
+    Purely a backup: never read back by the app. A failure here must never
+    fail registration/upload (the data is already in the DB at this point).
     """
     try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         path = os.path.join(UPLOAD_DIR, f"{user_id}.zip")
-        with open(path, "wb") as f:
-            f.write(raw_bytes)
+        payload = json.dumps({"likes": likes}, ensure_ascii=False)
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("likes.json", payload)
     except OSError:
-        logger.exception("Échec de la sauvegarde du zip brut pour user_id=%s", user_id)
+        logger.exception("Failed to save the slimmed-down export for user_id=%s", user_id)
 
 
 def add_videos(user_id, likes):
@@ -46,14 +50,14 @@ def has_videos(user_id):
     return count_videos(user_id) > 0
 
 
-def get_links(user_id, period_filter="all"):
-    """Retourne les vidéos likées par ce user, filtrées par période ('7d'/'30d'/'all')."""
+def get_links(user_id, period_days=None):
+    """Return the videos liked by this user, filtered to the last
+    `period_days` days (None = entire history)."""
     conn = db.get_db()
     query = "SELECT link, liked_at FROM videos WHERE user_id = ?"
     params = [user_id]
-    days = PERIOD_DAYS.get(period_filter)
-    if days is not None:
-        cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    if period_days is not None:
+        cutoff = (datetime.utcnow() - timedelta(days=period_days)).strftime("%Y-%m-%d %H:%M:%S")
         query += " AND liked_at >= ?"
         params.append(cutoff)
     rows = conn.execute(query, params).fetchall()

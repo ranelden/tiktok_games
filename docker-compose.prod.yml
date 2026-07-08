@@ -1,0 +1,8 @@
+services:
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    volumes:
+      - ./volumes/db:/data/db
+    ports:
+      - "${ADMINER_BIND:-127.0.0.1}:${ADMINER_PORT:-8081}:8080"

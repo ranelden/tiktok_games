@@ -1,20 +1,55 @@
 const views = document.querySelectorAll(".view");
 
+// Must stay in sync with game.PERIOD_OPTIONS server-side (same order, same values).
+const PERIOD_OPTIONS = [
+  { days: 1, label: "1 jour" },
+  { days: 3, label: "3 jours" },
+  { days: 7, label: "1 semaine" },
+  { days: 14, label: "2 semaines" },
+  { days: 30, label: "1 mois" },
+  { days: 60, label: "2 mois" },
+  { days: 90, label: "3 mois" },
+  { days: 180, label: "6 mois" },
+  { days: 365, label: "1 an" },
+  { days: null, label: "Tout l'historique" },
+];
+
 let currentUserId = null;
 let currentRoomCode = null;
 let roomPollInterval = null;
+const previousScores = {};
 
 function showView(id) {
   if (id !== "view-room") stopRoomPolling();
   views.forEach((v) => {
     v.hidden = v.id !== id;
   });
+  const target = document.getElementById(id);
+  target.classList.remove("view-enter");
+  void target.offsetWidth; // force a reflow so the animation replays every time
+  target.classList.add("view-enter");
+}
+
+function animateNumber(el, from, to, duration) {
+  if (from === to) {
+    el.textContent = to;
+    return;
+  }
+  const start = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = Math.round(from + (to - from) * eased);
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 }
 
 function renderDashboard(data) {
   currentUserId = data.user_id;
   document.getElementById("dashboard-email").textContent = data.email;
   document.getElementById("dashboard-count").textContent = data.video_count;
+  document.getElementById("username-input").value = data.username;
   showView("view-dashboard");
 }
 
@@ -27,6 +62,8 @@ function stopRoomPolling() {
 
 function enterRoom(code) {
   currentRoomCode = code;
+  for (const key in previousScores) delete previousScores[key];
+  lastEmbeddedLink = null;
   showView("view-room");
   refreshRoom();
   roomPollInterval = setInterval(refreshRoom, 2000);
@@ -50,7 +87,39 @@ function renderRoom(room) {
   list.innerHTML = "";
   room.players.forEach((p) => {
     const li = document.createElement("li");
-    li.textContent = `${p.email} — score : ${p.score}${p.has_data ? "" : " (données manquantes)"}`;
+    li.className = "player-row";
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "player-name";
+    nameSpan.textContent = p.username + (p.has_data ? "" : " (données manquantes)");
+
+    const scoreSpan = document.createElement("span");
+    scoreSpan.className = "player-score";
+    const valueSpan = document.createElement("span");
+    valueSpan.className = "score-value";
+    const deltaSpan = document.createElement("span");
+    deltaSpan.className = "score-delta";
+
+    const previous = previousScores[p.user_id];
+    const from = previous === undefined ? p.score : previous;
+    valueSpan.textContent = from;
+    animateNumber(valueSpan, from, p.score, 600);
+
+    if (previous !== undefined && previous !== p.score) {
+      const delta = p.score - previous;
+      deltaSpan.textContent = `${delta > 0 ? "+" : ""}${delta}`;
+      deltaSpan.classList.add(delta > 0 ? "positive" : "negative", "show");
+      scoreSpan.classList.add("score-flash");
+      setTimeout(() => scoreSpan.classList.remove("score-flash"), 1000);
+    }
+    previousScores[p.user_id] = p.score;
+
+    scoreSpan.appendChild(valueSpan);
+    scoreSpan.appendChild(document.createTextNode(" pts"));
+    scoreSpan.appendChild(deltaSpan);
+
+    li.appendChild(nameSpan);
+    li.appendChild(scoreSpan);
     list.appendChild(li);
   });
 
@@ -64,9 +133,10 @@ function renderRoom(room) {
 
   if (room.status === "lobby") {
     document.getElementById("config-num-rounds").value = room.config.num_rounds;
-    document.getElementById("config-period-filter").value = room.config.period_filter;
     document.getElementById("config-timer").value =
       room.config.timer_seconds === null ? "" : room.config.timer_seconds;
+    const periodIdx = PERIOD_OPTIONS.findIndex((o) => o.days === room.config.period_days);
+    setPeriodSlider(periodIdx === -1 ? PERIOD_OPTIONS.length - 1 : periodIdx);
   }
 
   if (room.status === "in_progress" && room.round) {
@@ -76,6 +146,30 @@ function renderRoom(room) {
   if (room.status === "finished") {
     renderFinal(room);
   }
+}
+
+let lastEmbeddedLink = null;
+
+function renderTikTokEmbed(link) {
+  const container = document.getElementById("round-video-embed");
+  const match = link.match(/video\/(\d+)/);
+  if (!match) {
+    container.innerHTML = "";
+    return;
+  }
+  const videoId = match[1];
+  container.innerHTML =
+    `<blockquote class="tiktok-embed" cite="${link}" data-video-id="${videoId}" ` +
+    `style="max-width:325px;min-width:280px;margin:0 auto;"><section></section></blockquote>`;
+  // TikTok doesn't auto-rescan the DOM for a blockquote added after the fact
+  // (SPA): force it to process the new one by reinjecting the script.
+  const old = document.getElementById("tiktok-embed-script");
+  if (old) old.remove();
+  const script = document.createElement("script");
+  script.id = "tiktok-embed-script";
+  script.async = true;
+  script.src = "https://www.tiktok.com/embed.js";
+  document.body.appendChild(script);
 }
 
 function renderRound(room) {
@@ -89,49 +183,82 @@ function renderRound(room) {
     ? `Likée le ${r.video.liked_at}`
     : "";
 
+  if (r.video.link !== lastEmbeddedLink) {
+    lastEmbeddedLink = r.video.link;
+    renderTikTokEmbed(r.video.link);
+  }
+
   const votingEl = document.getElementById("round-voting");
   const revealedEl = document.getElementById("round-revealed");
   votingEl.hidden = r.status !== "voting";
   revealedEl.hidden = r.status !== "revealed";
 
   if (r.status === "voting") {
-    const choicesEl = document.getElementById("round-choices");
+    const betSection = document.getElementById("round-bet-section");
+    const betStatus = document.getElementById("round-bet-status");
+    betSection.hidden = !(r.is_owner && !r.has_bet);
+    betStatus.hidden = !r.has_bet;
+
+    const voteForm = document.getElementById("round-vote-form");
     const waitingEl = document.getElementById("round-waiting-votes");
     if (r.has_voted) {
-      choicesEl.hidden = true;
+      voteForm.hidden = true;
+      waitingEl.hidden = false;
       waitingEl.textContent = `En attente des autres joueurs... (${r.votes_in}/${r.votes_expected})`;
     } else {
-      choicesEl.hidden = false;
-      waitingEl.textContent = "";
+      voteForm.hidden = false;
+      waitingEl.hidden = true;
+      const choicesEl = document.getElementById("round-choices");
       choicesEl.innerHTML = "";
       room.players
         .filter((p) => p.user_id !== currentUserId)
         .forEach((p) => {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.textContent = p.email;
-          btn.addEventListener("click", () => castVote(p.user_id));
-          choicesEl.appendChild(btn);
+          const label = document.createElement("label");
+          label.className = "choice-checkbox";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.value = p.user_id;
+          label.appendChild(input);
+          label.appendChild(document.createTextNode(p.username));
+          choicesEl.appendChild(label);
         });
     }
   }
 
   if (r.status === "revealed" && r.result) {
-    const ownerPlayer = room.players.find((p) => p.user_id === r.result.owner_id);
-    document.getElementById("round-answer").textContent = `C'était ${
-      ownerPlayer ? ownerPlayer.email : "?"
-    } !`;
+    const ownerNames =
+      r.result.owner_ids
+        .map((id) => room.players.find((p) => p.user_id === id))
+        .filter(Boolean)
+        .map((p) => p.username)
+        .join(", ") || "?";
+    document.getElementById("round-answer").textContent = `C'était : ${ownerNames}`;
 
     const list = document.getElementById("round-votes-list");
     list.innerHTML = "";
     r.result.votes.forEach((v) => {
       const voter = room.players.find((p) => p.user_id === v.voter_id);
-      const guessed = room.players.find((p) => p.user_id === v.guessed_user_id);
+      const guessedNames =
+        v.guessed_user_ids
+          .map((id) => room.players.find((p) => p.user_id === id))
+          .filter(Boolean)
+          .map((p) => p.username)
+          .join(", ") || "personne (temps écoulé)";
       const li = document.createElement("li");
-      li.textContent = `${voter ? voter.email : "?"} a voté ${
-        guessed ? guessed.email : "personne (temps écoulé)"
-      } — ${v.correct ? "✓" : "✗"}`;
+      const sign = v.points > 0 ? "+" : "";
+      li.textContent = `${voter ? voter.username : "?"} a voté ${guessedNames} — ${sign}${v.points} pt(s)`;
+      if (v.points > 0) li.classList.add("result-positive");
+      else if (v.points < 0) li.classList.add("result-negative");
       list.appendChild(li);
+    });
+
+    const betsList = document.getElementById("round-bets-list");
+    betsList.innerHTML = "";
+    r.result.bets.forEach((b) => {
+      const owner = room.players.find((p) => p.user_id === b.owner_id);
+      const li = document.createElement("li");
+      li.textContent = `Pari de ${owner ? owner.username : "?"} : ${b.missed_by} joueur(s) n'ont pas trouvé — +${b.bonus} pt(s)`;
+      betsList.appendChild(li);
     });
 
     document.getElementById("round-next-button").hidden = !room.is_chef;
@@ -141,18 +268,55 @@ function renderRound(room) {
 
 function renderFinal(room) {
   const sorted = [...room.players].sort((a, b) => b.score - a.score);
-  const list = document.getElementById("final-scoreboard");
+  const top3 = sorted.slice(0, 3);
+  const rest = sorted.slice(3);
+
+  const podium = document.getElementById("podium");
+  podium.innerHTML = "";
+  // Classic podium layout: 2nd place on the left, 1st in the middle, 3rd on the right.
+  const order = [top3[1], top3[0], top3[2]];
+  order.forEach((p) => {
+    if (!p) return;
+    const rank = top3.indexOf(p) + 1;
+    const place = document.createElement("div");
+    place.className = `podium-place rank-${rank}`;
+
+    const name = document.createElement("div");
+    name.className = "podium-name";
+    name.textContent = p.username;
+
+    const score = document.createElement("div");
+    score.className = "podium-score";
+    score.textContent = `${p.score} pts`;
+
+    const bar = document.createElement("div");
+    bar.className = "podium-bar";
+    bar.textContent = `#${rank}`;
+
+    place.appendChild(name);
+    place.appendChild(score);
+    place.appendChild(bar);
+    podium.appendChild(place);
+  });
+
+  const list = document.getElementById("final-scoreboard-rest");
   list.innerHTML = "";
-  sorted.forEach((p, i) => {
+  rest.forEach((p, i) => {
     const li = document.createElement("li");
-    li.textContent = `#${i + 1} — ${p.email} — ${p.score} pts`;
+    li.textContent = `#${i + 4} — ${p.username} — ${p.score} pts`;
     list.appendChild(li);
   });
 }
 
-async function castVote(guessedUserId) {
+function setPeriodSlider(idx) {
+  const slider = document.getElementById("config-period-slider");
+  slider.value = idx;
+  document.getElementById("config-period-label").textContent = PERIOD_OPTIONS[idx].label;
+}
+
+async function castVote(guessedUserIds) {
   const messageEl = document.getElementById("round-message");
-  const { ok, data } = await voteRequest(currentRoomCode, guessedUserId);
+  const { ok, data } = await voteRequest(currentRoomCode, guessedUserIds);
   if (!ok) {
     messageEl.textContent = data.error || "Erreur";
     return;
@@ -160,6 +324,28 @@ async function castVote(guessedUserId) {
   messageEl.textContent = "";
   renderRoom(data);
 }
+
+document.getElementById("round-vote-submit").addEventListener("click", async () => {
+  const checked = Array.from(document.querySelectorAll("#round-choices input:checked")).map((el) =>
+    parseInt(el.value, 10)
+  );
+  if (checked.length === 0) {
+    document.getElementById("round-message").textContent = "Sélectionne au moins un joueur.";
+    return;
+  }
+  await castVote(checked);
+});
+
+document.getElementById("round-bet-button").addEventListener("click", async () => {
+  const messageEl = document.getElementById("round-message");
+  const { ok, data } = await betRequest(currentRoomCode);
+  if (!ok) {
+    messageEl.textContent = data.error || "Erreur";
+    return;
+  }
+  messageEl.textContent = "";
+  renderRoom(data);
+});
 
 document.getElementById("show-login").addEventListener("click", () => showView("view-login"));
 document.getElementById("show-register").addEventListener("click", () => showView("view-register"));
@@ -247,20 +433,37 @@ document.getElementById("join-room-form").addEventListener("submit", async (e) =
   enterRoom(code);
 });
 
+document.getElementById("config-period-slider").addEventListener("input", (e) => {
+  document.getElementById("config-period-label").textContent = PERIOD_OPTIONS[parseInt(e.target.value, 10)].label;
+});
+
 document.getElementById("room-config-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const num_rounds = parseInt(document.getElementById("config-num-rounds").value, 10);
-  const period_filter = document.getElementById("config-period-filter").value;
+  const periodIdx = parseInt(document.getElementById("config-period-slider").value, 10);
+  const period_days = PERIOD_OPTIONS[periodIdx].days;
   const timerRaw = document.getElementById("config-timer").value;
   const timer_seconds = timerRaw === "" ? null : parseInt(timerRaw, 10);
   const messageEl = document.getElementById("room-config-message");
-  const { ok, data } = await updateRoomConfig(currentRoomCode, { num_rounds, period_filter, timer_seconds });
+  const { ok, data } = await updateRoomConfig(currentRoomCode, { num_rounds, period_days, timer_seconds });
   if (!ok) {
     messageEl.textContent = data.error || "Erreur";
     return;
   }
   messageEl.textContent = "Config mise à jour.";
   renderRoom(data);
+});
+
+document.getElementById("username-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = document.getElementById("username-input").value.trim();
+  const messageEl = document.getElementById("username-message");
+  const { ok, data } = await updateUsername(name);
+  if (!ok) {
+    messageEl.textContent = data.error || "Erreur";
+    return;
+  }
+  messageEl.textContent = "Pseudo mis à jour.";
 });
 
 document.getElementById("room-start-button").addEventListener("click", async () => {

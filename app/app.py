@@ -59,11 +59,16 @@ def register():
     user_id = auth.create_user(email, password)
     if likes:
         videos.add_videos(user_id, likes)
-        videos.save_raw_export(user_id, raw)
+        videos.save_raw_export(user_id, likes)
 
     user = auth.get_user_by_id(user_id)
     auth.login_user(user)
-    return jsonify(user_id=user["id"], email=user["email"], video_count=videos.count_videos(user_id))
+    return jsonify(
+        user_id=user["id"],
+        email=user["email"],
+        username=auth.get_username(user["id"]),
+        video_count=videos.count_videos(user_id),
+    )
 
 
 @app.route("/api/login", methods=["POST"])
@@ -77,7 +82,12 @@ def login():
         return jsonify(error="Email ou mot de passe incorrect"), 401
 
     auth.login_user(user)
-    return jsonify(user_id=user["id"], email=user["email"], video_count=videos.count_videos(user["id"]))
+    return jsonify(
+        user_id=user["id"],
+        email=user["email"],
+        username=auth.get_username(user["id"]),
+        video_count=videos.count_videos(user["id"]),
+    )
 
 
 @app.route("/api/logout", methods=["POST"])
@@ -91,7 +101,27 @@ def me():
     user = auth.current_user()
     if user is None:
         return jsonify(error="Non authentifié"), 401
-    return jsonify(user_id=user["id"], email=user["email"], video_count=videos.count_videos(user["id"]))
+    return jsonify(
+        user_id=user["id"],
+        email=user["email"],
+        username=auth.get_username(user["id"]),
+        video_count=videos.count_videos(user["id"]),
+    )
+
+
+@app.route("/api/username", methods=["POST"])
+@auth.login_required
+def update_username():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify(error="Pseudo vide"), 400
+    if len(name) > 30:
+        return jsonify(error="Pseudo trop long (30 caractères max)"), 400
+
+    user = auth.current_user()
+    auth.set_username(user["id"], name)
+    return jsonify(username=name)
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -108,7 +138,7 @@ def upload():
 
     user = auth.current_user()
     videos.add_videos(user["id"], likes)
-    videos.save_raw_export(user["id"], raw)
+    videos.save_raw_export(user["id"], likes)
     return jsonify(video_count=videos.count_videos(user["id"]))
 
 
@@ -154,7 +184,7 @@ def room_config(code):
         room,
         user["id"],
         num_rounds=data.get("num_rounds"),
-        period_filter=data.get("period_filter"),
+        period_days=data.get("period_days"),
         timer_seconds=data.get("timer_seconds"),
     )
     if error:
@@ -182,13 +212,29 @@ def room_vote(code):
     if room is None:
         return jsonify(error="Room introuvable"), 404
     data = request.get_json(silent=True) or {}
+    raw_ids = data.get("guessed_user_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return jsonify(error="guessed_user_ids invalide"), 400
     try:
-        guessed_user_id = int(data.get("guessed_user_id"))
+        guessed_user_ids = [int(x) for x in raw_ids]
     except (TypeError, ValueError):
-        return jsonify(error="guessed_user_id invalide"), 400
+        return jsonify(error="guessed_user_ids invalide"), 400
 
     user = auth.current_user()
-    error = game.submit_vote(room, user["id"], guessed_user_id)
+    error = game.submit_vote(room, user["id"], guessed_user_ids)
+    if error:
+        return jsonify(error=error), 400
+    return jsonify(room.to_dict(user["id"]))
+
+
+@app.route("/api/rooms/<code>/bet", methods=["POST"])
+@auth.login_required
+def room_bet(code):
+    room = game.get_room(code)
+    if room is None:
+        return jsonify(error="Room introuvable"), 404
+    user = auth.current_user()
+    error = game.place_bet(room, user["id"])
     if error:
         return jsonify(error=error), 400
     return jsonify(room.to_dict(user["id"]))
