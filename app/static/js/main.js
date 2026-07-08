@@ -59,7 +59,8 @@ function renderRoom(room) {
 
   document.getElementById("room-chef-config").hidden = !(room.is_chef && room.status === "lobby");
   document.getElementById("room-waiting").hidden = !(!room.is_chef && room.status === "lobby");
-  document.getElementById("room-in-progress").hidden = room.status === "lobby";
+  document.getElementById("room-in-progress").hidden = room.status !== "in_progress";
+  document.getElementById("room-finished").hidden = room.status !== "finished";
 
   if (room.status === "lobby") {
     document.getElementById("config-num-rounds").value = room.config.num_rounds;
@@ -67,6 +68,97 @@ function renderRoom(room) {
     document.getElementById("config-timer").value =
       room.config.timer_seconds === null ? "" : room.config.timer_seconds;
   }
+
+  if (room.status === "in_progress" && room.round) {
+    renderRound(room);
+  }
+
+  if (room.status === "finished") {
+    renderFinal(room);
+  }
+}
+
+function renderRound(room) {
+  const r = room.round;
+  document.getElementById("round-number").textContent = r.number;
+  document.getElementById("round-total").textContent = r.total;
+  document.getElementById("round-timer").textContent =
+    r.time_left !== null ? `Temps restant : ${r.time_left}s` : "";
+  document.getElementById("round-video-link").href = r.video.link;
+  document.getElementById("round-video-date").textContent = r.video.liked_at
+    ? `Likée le ${r.video.liked_at}`
+    : "";
+
+  const votingEl = document.getElementById("round-voting");
+  const revealedEl = document.getElementById("round-revealed");
+  votingEl.hidden = r.status !== "voting";
+  revealedEl.hidden = r.status !== "revealed";
+
+  if (r.status === "voting") {
+    const choicesEl = document.getElementById("round-choices");
+    const waitingEl = document.getElementById("round-waiting-votes");
+    if (r.has_voted) {
+      choicesEl.hidden = true;
+      waitingEl.textContent = `En attente des autres joueurs... (${r.votes_in}/${r.votes_expected})`;
+    } else {
+      choicesEl.hidden = false;
+      waitingEl.textContent = "";
+      choicesEl.innerHTML = "";
+      room.players
+        .filter((p) => p.user_id !== currentUserId)
+        .forEach((p) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = p.email;
+          btn.addEventListener("click", () => castVote(p.user_id));
+          choicesEl.appendChild(btn);
+        });
+    }
+  }
+
+  if (r.status === "revealed" && r.result) {
+    const ownerPlayer = room.players.find((p) => p.user_id === r.result.owner_id);
+    document.getElementById("round-answer").textContent = `C'était ${
+      ownerPlayer ? ownerPlayer.email : "?"
+    } !`;
+
+    const list = document.getElementById("round-votes-list");
+    list.innerHTML = "";
+    r.result.votes.forEach((v) => {
+      const voter = room.players.find((p) => p.user_id === v.voter_id);
+      const guessed = room.players.find((p) => p.user_id === v.guessed_user_id);
+      const li = document.createElement("li");
+      li.textContent = `${voter ? voter.email : "?"} a voté ${
+        guessed ? guessed.email : "personne (temps écoulé)"
+      } — ${v.correct ? "✓" : "✗"}`;
+      list.appendChild(li);
+    });
+
+    document.getElementById("round-next-button").hidden = !room.is_chef;
+    document.getElementById("round-next-waiting").hidden = room.is_chef;
+  }
+}
+
+function renderFinal(room) {
+  const sorted = [...room.players].sort((a, b) => b.score - a.score);
+  const list = document.getElementById("final-scoreboard");
+  list.innerHTML = "";
+  sorted.forEach((p, i) => {
+    const li = document.createElement("li");
+    li.textContent = `#${i + 1} — ${p.email} — ${p.score} pts`;
+    list.appendChild(li);
+  });
+}
+
+async function castVote(guessedUserId) {
+  const messageEl = document.getElementById("round-message");
+  const { ok, data } = await voteRequest(currentRoomCode, guessedUserId);
+  if (!ok) {
+    messageEl.textContent = data.error || "Erreur";
+    return;
+  }
+  messageEl.textContent = "";
+  renderRoom(data);
 }
 
 document.getElementById("show-login").addEventListener("click", () => showView("view-login"));
@@ -178,6 +270,17 @@ document.getElementById("room-start-button").addEventListener("click", async () 
     messageEl.textContent = data.error || "Erreur";
     return;
   }
+  renderRoom(data);
+});
+
+document.getElementById("round-next-button").addEventListener("click", async () => {
+  const messageEl = document.getElementById("round-message");
+  const { ok, data } = await nextRoundRequest(currentRoomCode);
+  if (!ok) {
+    messageEl.textContent = data.error || "Erreur";
+    return;
+  }
+  messageEl.textContent = "";
   renderRoom(data);
 });
 

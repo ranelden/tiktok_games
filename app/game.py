@@ -1,5 +1,6 @@
 import random
 import threading
+import time
 
 import auth
 import videos
@@ -29,7 +30,14 @@ class Room:
         self.scores = {}
         self.current_round = 0
         self.used_links = set()
-        self.lock = threading.Lock()
+        # État du round courant
+        self.round_video = None  # {"link":..., "liked_at":...}
+        self.round_owner = None  # user_id qui a réellement liké la vidéo
+        self.round_votes = {}  # voter_id -> guessed_user_id
+        self.round_status = None  # None | voting | revealed
+        self.round_started_at = None
+        self.last_result = None  # {"owner_id":..., "votes":[...]}
+        self.lock = threading.RLock()
 
     def add_player(self, user_id):
         if user_id not in self.player_ids:
@@ -37,29 +45,58 @@ class Room:
             self.scores[user_id] = 0
 
     def to_dict(self, current_user_id):
-        players = []
-        for uid in self.player_ids:
-            user = auth.get_user_by_id(uid)
-            players.append(
-                {
-                    "user_id": uid,
-                    "email": user["email"] if user else "?",
-                    "score": self.scores.get(uid, 0),
-                    "has_data": videos.has_videos(uid),
+        with self.lock:
+            _maybe_expire_timer(self)
+
+            players = []
+            for uid in self.player_ids:
+                user = auth.get_user_by_id(uid)
+                players.append(
+                    {
+                        "user_id": uid,
+                        "email": user["email"] if user else "?",
+                        "score": self.scores.get(uid, 0),
+                        "has_data": videos.has_videos(uid),
+                    }
+                )
+
+            round_data = None
+            if self.round_video is not None:
+                time_left = None
+                if self.round_status == "voting" and self.timer_seconds:
+                    elapsed = time.time() - self.round_started_at
+                    time_left = max(0, int(self.timer_seconds - elapsed))
+                result = None
+                if self.round_status == "revealed" and self.last_result:
+                    result = {
+                        "owner_id": self.last_result["owner_id"],
+                        "votes": self.last_result["votes"],
+                    }
+                round_data = {
+                    "number": self.current_round,
+                    "total": self.num_rounds,
+                    "status": self.round_status,
+                    "video": self.round_video,
+                    "time_left": time_left,
+                    "has_voted": current_user_id in self.round_votes,
+                    "votes_in": len(self.round_votes),
+                    "votes_expected": len(self.player_ids),
+                    "result": result,
                 }
-            )
-        return {
-            "code": self.code,
-            "status": self.status,
-            "chef_id": self.chef_id,
-            "is_chef": current_user_id == self.chef_id,
-            "config": {
-                "num_rounds": self.num_rounds,
-                "period_filter": self.period_filter,
-                "timer_seconds": self.timer_seconds,
-            },
-            "players": players,
-        }
+
+            return {
+                "code": self.code,
+                "status": self.status,
+                "chef_id": self.chef_id,
+                "is_chef": current_user_id == self.chef_id,
+                "config": {
+                    "num_rounds": self.num_rounds,
+                    "period_filter": self.period_filter,
+                    "timer_seconds": self.timer_seconds,
+                },
+                "players": players,
+                "round": round_data,
+            }
 
 
 def _generate_code():
@@ -113,6 +150,37 @@ def update_config(room, chef_id, num_rounds, period_filter, timer_seconds):
     return None
 
 
+def _build_pool(room):
+    """Vidéos likées par un seul joueur de la room (pas déjà tirées), pour éviter
+    les réponses ambiguës quand plusieurs joueurs ont liké la même vidéo."""
+    link_owners = {}
+    link_info = {}
+    for uid in room.player_ids:
+        for item in videos.get_links(uid, room.period_filter):
+            link_owners.setdefault(item["link"], set()).add(uid)
+            link_info[item["link"]] = item
+    pool = []
+    for link, owners in link_owners.items():
+        if len(owners) == 1 and link not in room.used_links:
+            pool.append({"link": link, "liked_at": link_info[link]["liked_at"], "owner": next(iter(owners))})
+    return pool
+
+
+def _draw_next_video(room):
+    pool = _build_pool(room)
+    if not pool:
+        return False
+    chosen = random.choice(pool)
+    room.round_video = {"link": chosen["link"], "liked_at": chosen["liked_at"]}
+    room.round_owner = chosen["owner"]
+    room.round_votes = {}
+    room.round_status = "voting"
+    room.round_started_at = time.time()
+    room.last_result = None
+    room.used_links.add(chosen["link"])
+    return True
+
+
 def start_game(room, chef_id):
     if room.chef_id != chef_id:
         return "Seul le chef peut lancer la partie"
@@ -126,4 +194,70 @@ def start_game(room, chef_id):
     with room.lock:
         room.status = "in_progress"
         room.current_round = 1
+        if not _draw_next_video(room):
+            room.status = "lobby"
+            room.current_round = 0
+            return "Aucune vidéo exploitable pour lancer la partie (essaie une période plus large)"
+    return None
+
+
+def _reveal(room):
+    if room.round_status != "voting":
+        return
+    results = []
+    for voter_id in room.player_ids:
+        guess = room.round_votes.get(voter_id)
+        correct = guess is not None and guess == room.round_owner
+        if correct:
+            room.scores[voter_id] = room.scores.get(voter_id, 0) + 1
+        results.append({"voter_id": voter_id, "guessed_user_id": guess, "correct": correct})
+    room.round_status = "revealed"
+    room.last_result = {"owner_id": room.round_owner, "votes": results}
+
+
+def _maybe_expire_timer(room):
+    if room.status != "in_progress" or room.round_status != "voting" or not room.timer_seconds:
+        return
+    if time.time() - room.round_started_at >= room.timer_seconds:
+        _reveal(room)
+
+
+def submit_vote(room, voter_id, guessed_user_id):
+    if room.status != "in_progress":
+        return "La partie n'est pas en cours"
+    with room.lock:
+        _maybe_expire_timer(room)
+        if room.round_status != "voting":
+            return "Le vote est clos pour ce round"
+        if voter_id not in room.player_ids:
+            return "Tu ne fais pas partie de cette room"
+        if guessed_user_id not in room.player_ids:
+            return "Joueur invalide"
+        if guessed_user_id == voter_id:
+            return "Tu ne peux pas voter pour toi-même"
+        if voter_id in room.round_votes:
+            return "Tu as déjà voté pour ce round"
+        room.round_votes[voter_id] = guessed_user_id
+        if len(room.round_votes) >= len(room.player_ids):
+            _reveal(room)
+    return None
+
+
+def advance_round(room, chef_id):
+    if room.chef_id != chef_id:
+        return "Seul le chef peut passer au round suivant"
+    with room.lock:
+        _maybe_expire_timer(room)
+        if room.status != "in_progress":
+            return "La partie n'est pas en cours"
+        if room.round_status != "revealed":
+            return "Le round en cours n'est pas encore révélé"
+        if room.current_round >= room.num_rounds:
+            room.status = "finished"
+            room.round_status = None
+            return None
+        room.current_round += 1
+        if not _draw_next_video(room):
+            room.status = "finished"
+            room.round_status = None
     return None

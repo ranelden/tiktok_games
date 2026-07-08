@@ -17,3 +17,11 @@ function updateRoomConfig(code, config) {
 function startRoomGame(code) {
   return apiPostJson(`/api/rooms/${code}/start`, {});
 }
+
+function voteRequest(code, guessedUserId) {
+  return apiPostJson(`/api/rooms/${code}/vote`, { guessed_user_id: guessedUserId });
+}
+
+function nextRoundRequest(code) {
+  return apiPostJson(`/api/rooms/${code}/next`, {});
+}

@@ -1,10 +1,13 @@
 import logging
 import os
+from datetime import datetime, timedelta
 
 import db
 
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
 logger = logging.getLogger(__name__)
+
+PERIOD_DAYS = {"7d": 7, "30d": 30}
 
 
 def save_raw_export(user_id, raw_bytes):
@@ -41,3 +44,17 @@ def count_videos(user_id):
 
 def has_videos(user_id):
     return count_videos(user_id) > 0
+
+
+def get_links(user_id, period_filter="all"):
+    """Retourne les vidéos likées par ce user, filtrées par période ('7d'/'30d'/'all')."""
+    conn = db.get_db()
+    query = "SELECT link, liked_at FROM videos WHERE user_id = ?"
+    params = [user_id]
+    days = PERIOD_DAYS.get(period_filter)
+    if days is not None:
+        cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        query += " AND liked_at >= ?"
+        params.append(cutoff)
+    rows = conn.execute(query, params).fetchall()
+    return [{"link": row["link"], "liked_at": row["liked_at"]} for row in rows]

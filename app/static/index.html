@@ -117,7 +117,30 @@
       </div>
 
       <div id="room-in-progress" hidden>
-        <p>Partie lancée ! (logique de round à venir à l'étape suivante)</p>
+        <p class="round-progress">Round <span id="round-number"></span> / <span id="round-total"></span></p>
+        <p id="round-timer"></p>
+        <a id="round-video-link" href="#" target="_blank" rel="noopener">Voir la vidéo</a>
+        <p id="round-video-date"></p>
+
+        <div id="round-voting" hidden>
+          <p>Qui a liké cette vidéo ?</p>
+          <div id="round-choices"></div>
+          <p id="round-waiting-votes"></p>
+        </div>
+
+        <div id="round-revealed" hidden>
+          <p id="round-answer"></p>
+          <ul id="round-votes-list"></ul>
+          <button type="button" id="round-next-button">Round suivant</button>
+          <p id="round-next-waiting" hidden>En attente que le chef lance le round suivant...</p>
+        </div>
+
+        <p id="round-message"></p>
+      </div>
+
+      <div id="room-finished" hidden>
+        <h3>Partie terminée !</h3>
+        <ol id="final-scoreboard"></ol>
       </div>
 
       <button type="button" id="room-leave-button">Retour au dashboard</button>

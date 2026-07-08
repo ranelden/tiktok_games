@@ -175,6 +175,38 @@ def room_start(code):
     return jsonify(room.to_dict(user["id"]))
 
 
+@app.route("/api/rooms/<code>/vote", methods=["POST"])
+@auth.login_required
+def room_vote(code):
+    room = game.get_room(code)
+    if room is None:
+        return jsonify(error="Room introuvable"), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        guessed_user_id = int(data.get("guessed_user_id"))
+    except (TypeError, ValueError):
+        return jsonify(error="guessed_user_id invalide"), 400
+
+    user = auth.current_user()
+    error = game.submit_vote(room, user["id"], guessed_user_id)
+    if error:
+        return jsonify(error=error), 400
+    return jsonify(room.to_dict(user["id"]))
+
+
+@app.route("/api/rooms/<code>/next", methods=["POST"])
+@auth.login_required
+def room_next(code):
+    room = game.get_room(code)
+    if room is None:
+        return jsonify(error="Room introuvable"), 404
+    user = auth.current_user()
+    error = game.advance_round(room, user["id"])
+    if error:
+        return jsonify(error=error), 400
+    return jsonify(room.to_dict(user["id"]))
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("APP_PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
