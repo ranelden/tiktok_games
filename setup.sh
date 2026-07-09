@@ -99,8 +99,15 @@ if [ "$RECONFIGURE" = true ]; then
 
   SECRET_KEY="$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))')"
 
+  # Caddy's {$DOMAIN} placeholder only falls back to a default when the env
+  # var is entirely unset, not when it's set-but-empty — and Compose always
+  # sets it (even to ""). So "no domain" must be written explicitly as ":80"
+  # (a valid Caddy address meaning "listen on port 80, any host"), never left
+  # blank, or Caddy fails to parse the whole file at startup.
+  CADDY_DOMAIN="${DOMAIN:-:80}"
+
   cat > .env <<EOF
-DOMAIN=$DOMAIN
+DOMAIN=$CADDY_DOMAIN
 HOST_HTTP_PORT=$HOST_HTTP_PORT
 HOST_HTTPS_PORT=$HOST_HTTPS_PORT
 APP_PORT=5000
@@ -115,6 +122,15 @@ fi
 
 # shellcheck disable=SC1091
 source .env
+
+# Repair .env files written before this fix: an empty DOMAIN makes Caddy
+# fail to parse its config at startup (see Caddyfile comment).
+if [ -z "${DOMAIN:-}" ]; then
+  warn "DOMAIN vide dans .env (Caddy plantera au démarrage) : correction automatique en ':80'..."
+  sed -i 's/^DOMAIN=.*/DOMAIN=:80/' .env
+  DOMAIN=":80"
+  ok ".env corrigé."
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Persistent directories
@@ -154,7 +170,7 @@ sudo docker compose "${COMPOSE_FILES[@]}" up -d --build
 echo
 ok "C'est lancé !"
 echo
-if [ -n "${DOMAIN:-}" ]; then
+if [ -n "${DOMAIN:-}" ] && [[ "$DOMAIN" != :* ]]; then
   echo "  Accès : https://$DOMAIN"
 else
   PUBLIC_IP="$(curl -fs4 ifconfig.me 2>/dev/null || echo "<IP-de-ce-serveur>")"
