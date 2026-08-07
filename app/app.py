@@ -227,19 +227,6 @@ def room_vote(code):
     return jsonify(room.to_dict(user["id"]))
 
 
-@app.route("/api/rooms/<code>/bet", methods=["POST"])
-@auth.login_required
-def room_bet(code):
-    room = game.get_room(code)
-    if room is None:
-        return jsonify(error="Room introuvable"), 404
-    user = auth.current_user()
-    error = game.place_bet(room, user["id"])
-    if error:
-        return jsonify(error=error), 400
-    return jsonify(room.to_dict(user["id"]))
-
-
 @app.route("/api/rooms/<code>/next", methods=["POST"])
 @auth.login_required
 def room_next(code):
@@ -248,6 +235,19 @@ def room_next(code):
         return jsonify(error="Room introuvable"), 404
     user = auth.current_user()
     error = game.advance_round(room, user["id"])
+    if error:
+        return jsonify(error=error), 400
+    return jsonify(room.to_dict(user["id"]))
+
+
+@app.route("/api/rooms/<code>/restart", methods=["POST"])
+@auth.login_required
+def room_restart(code):
+    room = game.get_room(code)
+    if room is None:
+        return jsonify(error="Room introuvable"), 404
+    user = auth.current_user()
+    error = game.restart_game(room, user["id"])
     if error:
         return jsonify(error=error), 400
     return jsonify(room.to_dict(user["id"]))

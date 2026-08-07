@@ -64,6 +64,7 @@ function enterRoom(code) {
   currentRoomCode = code;
   for (const key in previousScores) delete previousScores[key];
   lastEmbeddedLink = null;
+  lastChoicesRound = null;
   showView("view-room");
   refreshRoom();
   roomPollInterval = setInterval(refreshRoom, 2000);
@@ -149,6 +150,7 @@ function renderRoom(room) {
 }
 
 let lastEmbeddedLink = null;
+let lastChoicesRound = null;
 
 function renderTikTokEmbed(link) {
   const container = document.getElementById("round-video-embed");
@@ -190,15 +192,12 @@ function renderRound(room) {
 
   const votingEl = document.getElementById("round-voting");
   const revealedEl = document.getElementById("round-revealed");
-  votingEl.hidden = r.status !== "voting";
+  const ownerViewEl = document.getElementById("round-owner-view");
+  votingEl.hidden = r.status !== "voting" || r.is_owner;
   revealedEl.hidden = r.status !== "revealed";
+  ownerViewEl.hidden = !(r.status === "voting" && r.is_owner);
 
-  if (r.status === "voting") {
-    const betSection = document.getElementById("round-bet-section");
-    const betStatus = document.getElementById("round-bet-status");
-    betSection.hidden = !(r.is_owner && !r.has_bet);
-    betStatus.hidden = !r.has_bet;
-
+  if (r.status === "voting" && !r.is_owner) {
     const voteForm = document.getElementById("round-vote-form");
     const waitingEl = document.getElementById("round-waiting-votes");
     if (r.has_voted) {
@@ -208,20 +207,26 @@ function renderRound(room) {
     } else {
       voteForm.hidden = false;
       waitingEl.hidden = true;
-      const choicesEl = document.getElementById("round-choices");
-      choicesEl.innerHTML = "";
-      room.players
-        .filter((p) => p.user_id !== currentUserId)
-        .forEach((p) => {
-          const label = document.createElement("label");
-          label.className = "choice-checkbox";
-          const input = document.createElement("input");
-          input.type = "checkbox";
-          input.value = p.user_id;
-          label.appendChild(input);
-          label.appendChild(document.createTextNode(p.username));
-          choicesEl.appendChild(label);
-        });
+      // Only (re)build the checkboxes once per round: this view re-renders on
+      // every poll tick (every 2s), and rebuilding the DOM each time was
+      // wiping out choices the player had already checked but not submitted.
+      if (lastChoicesRound !== r.number) {
+        lastChoicesRound = r.number;
+        const choicesEl = document.getElementById("round-choices");
+        choicesEl.innerHTML = "";
+        room.players
+          .filter((p) => p.user_id !== currentUserId)
+          .forEach((p) => {
+            const label = document.createElement("label");
+            label.className = "choice-checkbox";
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.value = p.user_id;
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(p.username));
+            choicesEl.appendChild(label);
+          });
+      }
     }
   }
 
@@ -252,13 +257,13 @@ function renderRound(room) {
       list.appendChild(li);
     });
 
-    const betsList = document.getElementById("round-bets-list");
-    betsList.innerHTML = "";
-    r.result.bets.forEach((b) => {
+    const bonusList = document.getElementById("round-bets-list");
+    bonusList.innerHTML = "";
+    r.result.bonuses.forEach((b) => {
       const owner = room.players.find((p) => p.user_id === b.owner_id);
       const li = document.createElement("li");
-      li.textContent = `Pari de ${owner ? owner.username : "?"} : ${b.missed_by} joueur(s) n'ont pas trouvé — +${b.bonus} pt(s)`;
-      betsList.appendChild(li);
+      li.textContent = `${owner ? owner.username : "?"} : ${b.missed_by} joueur(s) ne l'ont pas trouvé — +${b.bonus} pt(s) bonus`;
+      bonusList.appendChild(li);
     });
 
     document.getElementById("round-next-button").hidden = !room.is_chef;
@@ -306,6 +311,9 @@ function renderFinal(room) {
     li.textContent = `#${i + 4} — ${p.username} — ${p.score} pts`;
     list.appendChild(li);
   });
+
+  document.getElementById("room-restart-button").hidden = !room.is_chef;
+  document.getElementById("room-restart-waiting").hidden = room.is_chef;
 }
 
 function setPeriodSlider(idx) {
@@ -336,9 +344,9 @@ document.getElementById("round-vote-submit").addEventListener("click", async () 
   await castVote(checked);
 });
 
-document.getElementById("round-bet-button").addEventListener("click", async () => {
-  const messageEl = document.getElementById("round-message");
-  const { ok, data } = await betRequest(currentRoomCode);
+document.getElementById("room-restart-button").addEventListener("click", async () => {
+  const messageEl = document.getElementById("room-restart-message");
+  const { ok, data } = await restartRoomRequest(currentRoomCode);
   if (!ok) {
     messageEl.textContent = data.error || "Erreur";
     return;

@@ -128,13 +128,11 @@
         <a id="round-video-link" href="#" target="_blank" rel="noopener">Ouvrir sur TikTok</a>
         <p id="round-video-date"></p>
 
-        <div id="round-voting" hidden>
-          <div id="round-bet-section" hidden>
-            <p>C'est une de tes vidéos ! Parie que personne ne te trouvera pour gagner un bonus.</p>
-            <button type="button" id="round-bet-button">Parier</button>
-          </div>
-          <p id="round-bet-status" hidden>Pari placé pour ce round — bonus si les autres ne te trouvent pas.</p>
+        <div id="round-owner-view" hidden>
+          <p>C'est une de tes vidéos ! Tu gagnes des points bonus pour chaque joueur qui ne te trouve pas — pas besoin de voter sur ton propre round.</p>
+        </div>
 
+        <div id="round-voting" hidden>
           <div id="round-vote-form">
             <p>Qui a liké cette vidéo ? (plusieurs choix possibles, mais si un seul est faux, tout le vote est raté)</p>
             <div id="round-choices"></div>
@@ -158,6 +156,9 @@
         <h3>Partie terminée !</h3>
         <div id="podium"></div>
         <ol id="final-scoreboard-rest"></ol>
+        <button type="button" id="room-restart-button" hidden>Rejouer</button>
+        <p id="room-restart-waiting" hidden>En attente que le chef relance une partie...</p>
+        <p id="room-restart-message"></p>
       </div>
 
       <button type="button" id="room-leave-button">Retour au dashboard</button>

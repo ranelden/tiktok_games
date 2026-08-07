@@ -22,10 +22,10 @@ function voteRequest(code, guessedUserIds) {
   return apiPostJson(`/api/rooms/${code}/vote`, { guessed_user_ids: guessedUserIds });
 }
 
-function betRequest(code) {
-  return apiPostJson(`/api/rooms/${code}/bet`, {});
-}
-
 function nextRoundRequest(code) {
   return apiPostJson(`/api/rooms/${code}/next`, {});
+}
+
+function restartRoomRequest(code) {
+  return apiPostJson(`/api/rooms/${code}/restart`, {});
 }

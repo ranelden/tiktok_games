@@ -23,8 +23,8 @@ TIMER_OPTIONS = {None, 15, 30, 60}
 SINGLE_CORRECT_POINTS = 1
 MULTI_CORRECT_POINTS = 2
 MULTI_WRONG_PENALTY = 1
-# Bet placed by the video's owner: earns points for every player who didn't
-# identify them among their picks.
+# Bonus for the video's owner(s), automatic every round: points per player
+# who didn't identify them among their picks.
 BET_BONUS_PER_MISS = 2
 
 _rooms = {}
@@ -46,11 +46,11 @@ class Room:
         # Current round state
         self.round_video = None  # {"link":..., "liked_at":...}
         self.round_owners = set()  # user_ids who actually liked the video (can be several)
+        self.round_voters = set()  # player_ids allowed/expected to vote this round (owners excluded)
         self.round_votes = {}  # voter_id -> set(guessed_user_ids)
-        self.round_bets = set()  # owner_ids who bet on this round
         self.round_status = None  # None | voting | revealed
         self.round_started_at = None
-        self.last_result = None  # {"owner_ids":[...], "votes":[...], "bets":[...]}
+        self.last_result = None  # {"owner_ids":[...], "votes":[...], "bonuses":[...]}
         self.lock = threading.RLock()
 
     def add_player(self, user_id):
@@ -92,9 +92,8 @@ class Room:
                     "time_left": time_left,
                     "has_voted": current_user_id in self.round_votes,
                     "votes_in": len(self.round_votes),
-                    "votes_expected": len(self.player_ids),
+                    "votes_expected": len(self.round_voters),
                     "is_owner": current_user_id in self.round_owners,
-                    "has_bet": current_user_id in self.round_bets,
                     "result": result,
                 }
 
@@ -164,46 +163,53 @@ def update_config(room, chef_id, num_rounds, period_days, timer_seconds):
     return None
 
 
-def _link_owners(room):
-    """Every video liked by at least one player in the room, along with the
-    full set of players who liked it (can be more than one)."""
+def _pool_by_owner(room):
+    """Videos not drawn yet this game, grouped by each of their owners,
+    excluding any video liked by literally every player in the room (nobody
+    would be left to vote on it).
+
+    Grouping by owner first (rather than a flat list of every video) is what
+    makes the draw below fair: a player who liked 5000 videos and one who
+    liked 50 both get an equal chance of being featured in a round, instead
+    of the prolific liker dominating a flat random pick.
+    """
     link_owners = {}
     link_info = {}
     for uid in room.player_ids:
         for item in videos.get_links(uid, room.period_days):
             link_owners.setdefault(item["link"], set()).add(uid)
             link_info[item["link"]] = item
-    return link_owners, link_info
 
-
-def _build_pool(room):
-    """Videos not drawn yet this game. A video liked by several players stays
-    eligible: at reveal time, each of those players counts as a correct
-    answer."""
-    link_owners, link_info = _link_owners(room)
-    pool = []
+    by_owner = {}
+    total_players = len(room.player_ids)
     for link, owners in link_owners.items():
-        if link not in room.used_links:
-            pool.append({"link": link, "liked_at": link_info[link]["liked_at"], "owners": owners})
-    return pool
+        if link in room.used_links or len(owners) >= total_players:
+            continue
+        entry = {"link": link, "liked_at": link_info[link]["liked_at"], "owners": owners}
+        for owner_id in owners:
+            by_owner.setdefault(owner_id, []).append(entry)
+    return by_owner, len(link_owners)
 
 
 def _no_video_message(room):
-    link_owners, _ = _link_owners(room)
-    if not link_owners:
+    _, total = _pool_by_owner(room)
+    if total == 0:
         return "Aucun joueur n'a de vidéo likée sur cette période — essaie une période plus large."
     return "Toutes les vidéos disponibles sur cette période ont déjà été tirées cette partie."
 
 
 def _draw_next_video(room):
-    pool = _build_pool(room)
-    if not pool:
+    by_owner, _ = _pool_by_owner(room)
+    if not by_owner:
         return False
-    chosen = random.choice(pool)
+    # Fair two-stage draw: pick a featured player uniformly among those who
+    # still have an eligible video, then pick uniformly among their videos.
+    owner_id = random.choice(list(by_owner.keys()))
+    chosen = random.choice(by_owner[owner_id])
     room.round_video = {"link": chosen["link"], "liked_at": chosen["liked_at"]}
     room.round_owners = chosen["owners"]
+    room.round_voters = set(room.player_ids) - room.round_owners
     room.round_votes = {}
-    room.round_bets = set()
     room.round_status = "voting"
     room.round_started_at = time.time()
     room.last_result = None
@@ -251,7 +257,7 @@ def _reveal(room):
     owners = room.round_owners
 
     votes_result = []
-    for voter_id in room.player_ids:
+    for voter_id in room.round_voters:
         guesses = room.round_votes.get(voter_id, set())
         points = _score_vote(guesses, owners) if guesses else 0
         if points:
@@ -264,24 +270,21 @@ def _reveal(room):
             }
         )
 
-    bets_result = []
-    for owner_id in room.round_bets:
-        found_by = sum(
-            1
-            for uid in room.player_ids
-            if uid != owner_id and owner_id in room.round_votes.get(uid, set())
-        )
-        total_others = len(room.player_ids) - 1
-        missed_by = max(0, total_others - found_by)
+    # Automatic bonus for every owner: points per voter who didn't pick them.
+    bonuses_result = []
+    for owner_id in owners:
+        found_by = sum(1 for uid in room.round_voters if owner_id in room.round_votes.get(uid, set()))
+        missed_by = max(0, len(room.round_voters) - found_by)
         bonus = BET_BONUS_PER_MISS * missed_by
-        room.scores[owner_id] = room.scores.get(owner_id, 0) + bonus
-        bets_result.append({"owner_id": owner_id, "missed_by": missed_by, "bonus": bonus})
+        if bonus:
+            room.scores[owner_id] = room.scores.get(owner_id, 0) + bonus
+        bonuses_result.append({"owner_id": owner_id, "missed_by": missed_by, "bonus": bonus})
 
     room.round_status = "revealed"
     room.last_result = {
         "owner_ids": sorted(owners),
         "votes": votes_result,
-        "bets": bets_result,
+        "bonuses": bonuses_result,
     }
 
 
@@ -299,8 +302,8 @@ def submit_vote(room, voter_id, guessed_user_ids):
         _maybe_expire_timer(room)
         if room.round_status != "voting":
             return "Le vote est clos pour ce round"
-        if voter_id not in room.player_ids:
-            return "Tu ne fais pas partie de cette room"
+        if voter_id not in room.round_voters:
+            return "Tu ne peux pas voter sur ta propre vidéo"
         guesses = set(guessed_user_ids)
         if not guesses:
             return "Choisis au moins un joueur"
@@ -311,23 +314,8 @@ def submit_vote(room, voter_id, guessed_user_ids):
         if voter_id in room.round_votes:
             return "Tu as déjà voté pour ce round"
         room.round_votes[voter_id] = guesses
-        if len(room.round_votes) >= len(room.player_ids):
+        if len(room.round_votes) >= len(room.round_voters):
             _reveal(room)
-    return None
-
-
-def place_bet(room, owner_id):
-    if room.status != "in_progress":
-        return "La partie n'est pas en cours"
-    with room.lock:
-        _maybe_expire_timer(room)
-        if room.round_status != "voting":
-            return "Trop tard pour parier sur ce round"
-        if owner_id not in room.round_owners:
-            return "Tu n'es pas propriétaire de la vidéo de ce round"
-        if owner_id in room.round_bets:
-            return "Tu as déjà parié sur ce round"
-        room.round_bets.add(owner_id)
     return None
 
 
@@ -348,4 +336,26 @@ def advance_round(room, chef_id):
         if not _draw_next_video(room):
             room.status = "finished"
             room.round_status = None
+    return None
+
+
+def restart_game(room, chef_id):
+    """Replay in the same room (same code, same players, same config) without
+    forcing everyone to leave and recreate/rejoin a fresh room."""
+    if room.chef_id != chef_id:
+        return "Seul le chef peut relancer la partie"
+    if room.status not in ("finished", "lobby"):
+        return "La partie est encore en cours"
+    with room.lock:
+        room.status = "lobby"
+        room.current_round = 0
+        room.used_links = set()
+        room.scores = {uid: 0 for uid in room.player_ids}
+        room.round_video = None
+        room.round_owners = set()
+        room.round_voters = set()
+        room.round_votes = {}
+        room.round_status = None
+        room.round_started_at = None
+        room.last_result = None
     return None
