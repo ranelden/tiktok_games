@@ -18,8 +18,12 @@ function startRoomGame(code) {
   return apiPostJson(`/api/rooms/${code}/start`, {});
 }
 
-function voteRequest(code, guessedUserIds) {
-  return apiPostJson(`/api/rooms/${code}/vote`, { guessed_user_ids: guessedUserIds });
+function voteRequest(code, guessedUserIds, useBet) {
+  return apiPostJson(`/api/rooms/${code}/vote`, { guessed_user_ids: guessedUserIds, use_bet: !!useBet });
+}
+
+function ownerBetRequest(code) {
+  return apiPostJson(`/api/rooms/${code}/owner-bet`, {});
 }
 
 function nextRoundRequest(code) {

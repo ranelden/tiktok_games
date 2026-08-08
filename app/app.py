@@ -186,6 +186,10 @@ def room_config(code):
         num_rounds=data.get("num_rounds"),
         period_days=data.get("period_days"),
         timer_seconds=data.get("timer_seconds"),
+        points_correct=data.get("points_correct"),
+        points_owner_miss=data.get("points_owner_miss"),
+        bet_multiplier=data.get("bet_multiplier"),
+        bet_quota_percent=data.get("bet_quota_percent"),
     )
     if error:
         return jsonify(error=error), 400
@@ -219,9 +223,23 @@ def room_vote(code):
         guessed_user_ids = [int(x) for x in raw_ids]
     except (TypeError, ValueError):
         return jsonify(error="guessed_user_ids invalide"), 400
+    use_bet = bool(data.get("use_bet"))
 
     user = auth.current_user()
-    error = game.submit_vote(room, user["id"], guessed_user_ids)
+    error = game.submit_vote(room, user["id"], guessed_user_ids, use_bet=use_bet)
+    if error:
+        return jsonify(error=error), 400
+    return jsonify(room.to_dict(user["id"]))
+
+
+@app.route("/api/rooms/<code>/owner-bet", methods=["POST"])
+@auth.login_required
+def room_owner_bet(code):
+    room = game.get_room(code)
+    if room is None:
+        return jsonify(error="Room introuvable"), 404
+    user = auth.current_user()
+    error = game.place_owner_bet(room, user["id"])
     if error:
         return jsonify(error=error), 400
     return jsonify(room.to_dict(user["id"]))
@@ -256,4 +274,7 @@ def room_restart(code):
 if __name__ == "__main__":
     port = int(os.environ.get("APP_PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    # threaded=True matters now that drawing a round can make a blocking
+    # network call (video availability check): without it, the single-
+    # threaded dev server would freeze every room for everyone while it waits.
+    app.run(host="0.0.0.0", port=port, debug=debug, threaded=True)

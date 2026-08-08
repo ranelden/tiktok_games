@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import zipfile
-from datetime import datetime, timedelta
 
 import db
 
@@ -50,15 +49,11 @@ def has_videos(user_id):
     return count_videos(user_id) > 0
 
 
-def get_links(user_id, period_days=None):
-    """Return the videos liked by this user, filtered to the last
-    `period_days` days (None = entire history)."""
+def get_links(user_id):
+    """Return every video liked by this user (entire history). Period
+    filtering happens in game.py, relative to the room's most recent liked
+    video rather than to today's date — see the comment there for why.
+    """
     conn = db.get_db()
-    query = "SELECT link, liked_at FROM videos WHERE user_id = ?"
-    params = [user_id]
-    if period_days is not None:
-        cutoff = (datetime.utcnow() - timedelta(days=period_days)).strftime("%Y-%m-%d %H:%M:%S")
-        query += " AND liked_at >= ?"
-        params.append(cutoff)
-    rows = conn.execute(query, params).fetchall()
+    rows = conn.execute("SELECT link, liked_at FROM videos WHERE user_id = ?", (user_id,)).fetchall()
     return [{"link": row["link"], "liked_at": row["liked_at"]} for row in rows]

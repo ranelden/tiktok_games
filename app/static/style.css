@@ -227,6 +227,22 @@ button[data-back]:hover,
   border-color: var(--purple);
 }
 
+#vote-bet-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-direction: row;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-align: left;
+}
+
+#vote-bet-label input {
+  width: auto;
+  flex: none;
+}
+
 #round-video-embed {
   display: flex;
   justify-content: center;
@@ -250,6 +266,13 @@ button[data-back]:hover,
   font-family: monospace;
   letter-spacing: 0.1em;
   color: var(--purple);
+}
+
+#room-code-copy {
+  margin-left: 0.5rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  vertical-align: middle;
 }
 
 /* Smooth transitions between screens */
@@ -287,6 +310,27 @@ button[data-back]:hover,
   font-weight: 700;
   color: var(--purple);
   white-space: nowrap;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.8rem;
+  vertical-align: middle;
+}
+
+.player-name,
+.podium-name,
+.last-place-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 @keyframes score-flash {
@@ -419,6 +463,36 @@ button[data-back]:hover,
 
 .podium-place.rank-1 .podium-name {
   color: #b5850a;
+}
+
+.last-place-box {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0 auto 1.5rem;
+  padding: 0.8rem 1.5rem;
+  background: #f3f1fa;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  filter: grayscale(40%);
+}
+
+.last-place-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.last-place-name {
+  font-weight: 700;
+}
+
+.last-place-score {
+  color: var(--ink-soft);
+  font-weight: 600;
 }
 
 #final-scoreboard-rest {

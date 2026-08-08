@@ -17,6 +17,7 @@ const PERIOD_OPTIONS = [
 let currentUserId = null;
 let currentRoomCode = null;
 let roomPollInterval = null;
+let configInitialized = false;
 const previousScores = {};
 
 function showView(id) {
@@ -28,6 +29,20 @@ function showView(id) {
   target.classList.remove("view-enter");
   void target.offsetWidth; // force a reflow so the animation replays every time
   target.classList.add("view-enter");
+}
+
+const AVATAR_COLORS = ["#ff2d6f", "#7c5cff", "#12d6d6", "#f5b400", "#1fa96b", "#ff7a45", "#3f8efc"];
+
+function avatarColor(userId) {
+  return AVATAR_COLORS[userId % AVATAR_COLORS.length];
+}
+
+function makeAvatar(username, userId) {
+  const span = document.createElement("span");
+  span.className = "avatar";
+  span.style.background = avatarColor(userId);
+  span.textContent = (username || "?").trim().charAt(0).toUpperCase();
+  return span;
 }
 
 function animateNumber(el, from, to, duration) {
@@ -65,6 +80,7 @@ function enterRoom(code) {
   for (const key in previousScores) delete previousScores[key];
   lastEmbeddedLink = null;
   lastChoicesRound = null;
+  configInitialized = false;
   showView("view-room");
   refreshRoom();
   roomPollInterval = setInterval(refreshRoom, 2000);
@@ -92,7 +108,10 @@ function renderRoom(room) {
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "player-name";
-    nameSpan.textContent = p.username + (p.has_data ? "" : " (données manquantes)");
+    nameSpan.appendChild(makeAvatar(p.username, p.user_id));
+    nameSpan.appendChild(
+      document.createTextNode(" " + p.username + (p.has_data ? "" : " (données manquantes)"))
+    );
 
     const scoreSpan = document.createElement("span");
     scoreSpan.className = "player-score";
@@ -132,12 +151,21 @@ function renderRoom(room) {
   document.getElementById("room-in-progress").hidden = room.status !== "in_progress";
   document.getElementById("room-finished").hidden = room.status !== "finished";
 
-  if (room.status === "lobby") {
+  // Only pre-fill the config form once per room visit: it re-renders on every
+  // poll tick (every 2s) while in the lobby, and re-populating the fields
+  // every time was wiping out whatever the chef was mid-typing/dragging
+  // before they'd submitted it.
+  if (room.status === "lobby" && !configInitialized) {
+    configInitialized = true;
     document.getElementById("config-num-rounds").value = room.config.num_rounds;
     document.getElementById("config-timer").value =
       room.config.timer_seconds === null ? "" : room.config.timer_seconds;
     const periodIdx = PERIOD_OPTIONS.findIndex((o) => o.days === room.config.period_days);
     setPeriodSlider(periodIdx === -1 ? PERIOD_OPTIONS.length - 1 : periodIdx);
+    document.getElementById("config-points-correct").value = room.config.points_correct;
+    document.getElementById("config-points-owner-miss").value = room.config.points_owner_miss;
+    document.getElementById("config-bet-multiplier").value = room.config.bet_multiplier;
+    document.getElementById("config-bet-quota").value = room.config.bet_quota_percent;
   }
 
   if (room.status === "in_progress" && room.round) {
@@ -197,6 +225,14 @@ function renderRound(room) {
   revealedEl.hidden = r.status !== "revealed";
   ownerViewEl.hidden = !(r.status === "voting" && r.is_owner);
 
+  if (r.status === "voting" && r.is_owner) {
+    const me = room.players.find((p) => p.user_id === currentUserId);
+    const quota = me ? me.bets_remaining : 0;
+    document.getElementById("owner-bet-section").hidden = r.has_owner_bet || quota <= 0;
+    document.getElementById("owner-bet-quota").textContent = quota;
+    document.getElementById("owner-bet-status").hidden = !r.has_owner_bet;
+  }
+
   if (r.status === "voting" && !r.is_owner) {
     const voteForm = document.getElementById("round-vote-form");
     const waitingEl = document.getElementById("round-waiting-votes");
@@ -222,11 +258,19 @@ function renderRound(room) {
             const input = document.createElement("input");
             input.type = "checkbox";
             input.value = p.user_id;
+            input.addEventListener("change", updateVoteBetAvailability);
             label.appendChild(input);
-            label.appendChild(document.createTextNode(p.username));
+            label.appendChild(makeAvatar(p.username, p.user_id));
+            label.appendChild(document.createTextNode(" " + p.username));
             choicesEl.appendChild(label);
           });
       }
+
+      const me = room.players.find((p) => p.user_id === currentUserId);
+      const quota = me ? me.bets_remaining : 0;
+      document.getElementById("vote-bet-quota").textContent = quota;
+      document.getElementById("vote-bet-label").hidden = quota <= 0;
+      updateVoteBetAvailability();
     }
   }
 
@@ -251,7 +295,8 @@ function renderRound(room) {
           .join(", ") || "personne (temps écoulé)";
       const li = document.createElement("li");
       const sign = v.points > 0 ? "+" : "";
-      li.textContent = `${voter ? voter.username : "?"} a voté ${guessedNames} — ${sign}${v.points} pt(s)`;
+      const betTag = v.used_bet ? " [pari]" : "";
+      li.textContent = `${voter ? voter.username : "?"} a voté ${guessedNames}${betTag} — ${sign}${Math.round(v.points)} pt(s)`;
       if (v.points > 0) li.classList.add("result-positive");
       else if (v.points < 0) li.classList.add("result-negative");
       list.appendChild(li);
@@ -262,7 +307,10 @@ function renderRound(room) {
     r.result.bonuses.forEach((b) => {
       const owner = room.players.find((p) => p.user_id === b.owner_id);
       const li = document.createElement("li");
-      li.textContent = `${owner ? owner.username : "?"} : ${b.missed_by} joueur(s) ne l'ont pas trouvé — +${b.bonus} pt(s) bonus`;
+      const sign = b.bonus > 0 ? "+" : "";
+      const betTag = b.used_bet ? " [pari]" : "";
+      li.textContent = `${owner ? owner.username : "?"}${betTag} : ${b.missed_by} joueur(s) ne l'ont pas trouvé — ${sign}${Math.round(b.bonus)} pt(s)`;
+      if (b.bonus < 0) li.classList.add("result-negative");
       bonusList.appendChild(li);
     });
 
@@ -288,7 +336,8 @@ function renderFinal(room) {
 
     const name = document.createElement("div");
     name.className = "podium-name";
-    name.textContent = p.username;
+    name.appendChild(makeAvatar(p.username, p.user_id));
+    name.appendChild(document.createTextNode(" " + p.username));
 
     const score = document.createElement("div");
     score.className = "podium-score";
@@ -304,9 +353,33 @@ function renderFinal(room) {
     podium.appendChild(place);
   });
 
+  // Shame corner: only show it when there's someone who isn't already on the
+  // podium (otherwise last place = 2nd or 3rd, no point calling it out twice).
+  const lastPlaceEl = document.getElementById("last-place");
+  lastPlaceEl.innerHTML = "";
+  const lastPlace = sorted[sorted.length - 1];
+  if (sorted.length > 3 && lastPlace) {
+    const box = document.createElement("div");
+    box.className = "last-place-box";
+    const label = document.createElement("div");
+    label.className = "last-place-label";
+    label.textContent = "Dernière place";
+    const name = document.createElement("div");
+    name.className = "last-place-name";
+    name.appendChild(makeAvatar(lastPlace.username, lastPlace.user_id));
+    name.appendChild(document.createTextNode(" " + lastPlace.username));
+    const score = document.createElement("div");
+    score.className = "last-place-score";
+    score.textContent = `${lastPlace.score} pts`;
+    box.appendChild(label);
+    box.appendChild(name);
+    box.appendChild(score);
+    lastPlaceEl.appendChild(box);
+  }
+
   const list = document.getElementById("final-scoreboard-rest");
   list.innerHTML = "";
-  rest.forEach((p, i) => {
+  rest.slice(0, sorted.length > 3 ? rest.length - 1 : rest.length).forEach((p, i) => {
     const li = document.createElement("li");
     li.textContent = `#${i + 4} — ${p.username} — ${p.score} pts`;
     list.appendChild(li);
@@ -322,9 +395,20 @@ function setPeriodSlider(idx) {
   document.getElementById("config-period-label").textContent = PERIOD_OPTIONS[idx].label;
 }
 
-async function castVote(guessedUserIds) {
+function updateVoteBetAvailability() {
+  const checked = document.querySelectorAll("#round-choices input:checked");
+  const betCheckbox = document.getElementById("vote-bet-checkbox");
+  if (checked.length !== 1) {
+    betCheckbox.checked = false;
+    betCheckbox.disabled = true;
+  } else {
+    betCheckbox.disabled = false;
+  }
+}
+
+async function castVote(guessedUserIds, useBet) {
   const messageEl = document.getElementById("round-message");
-  const { ok, data } = await voteRequest(currentRoomCode, guessedUserIds);
+  const { ok, data } = await voteRequest(currentRoomCode, guessedUserIds, useBet);
   if (!ok) {
     messageEl.textContent = data.error || "Erreur";
     return;
@@ -341,7 +425,19 @@ document.getElementById("round-vote-submit").addEventListener("click", async () 
     document.getElementById("round-message").textContent = "Sélectionne au moins un joueur.";
     return;
   }
-  await castVote(checked);
+  const useBet = document.getElementById("vote-bet-checkbox").checked;
+  await castVote(checked, useBet);
+});
+
+document.getElementById("owner-bet-button").addEventListener("click", async () => {
+  const messageEl = document.getElementById("round-message");
+  const { ok, data } = await ownerBetRequest(currentRoomCode);
+  if (!ok) {
+    messageEl.textContent = data.error || "Erreur";
+    return;
+  }
+  messageEl.textContent = "";
+  renderRoom(data);
 });
 
 document.getElementById("room-restart-button").addEventListener("click", async () => {
@@ -452,8 +548,20 @@ document.getElementById("room-config-form").addEventListener("submit", async (e)
   const period_days = PERIOD_OPTIONS[periodIdx].days;
   const timerRaw = document.getElementById("config-timer").value;
   const timer_seconds = timerRaw === "" ? null : parseInt(timerRaw, 10);
+  const points_correct = parseInt(document.getElementById("config-points-correct").value, 10);
+  const points_owner_miss = parseInt(document.getElementById("config-points-owner-miss").value, 10);
+  const bet_multiplier = parseFloat(document.getElementById("config-bet-multiplier").value);
+  const bet_quota_percent = parseInt(document.getElementById("config-bet-quota").value, 10);
   const messageEl = document.getElementById("room-config-message");
-  const { ok, data } = await updateRoomConfig(currentRoomCode, { num_rounds, period_days, timer_seconds });
+  const { ok, data } = await updateRoomConfig(currentRoomCode, {
+    num_rounds,
+    period_days,
+    timer_seconds,
+    points_correct,
+    points_owner_miss,
+    bet_multiplier,
+    bet_quota_percent,
+  });
   if (!ok) {
     messageEl.textContent = data.error || "Erreur";
     return;
@@ -493,6 +601,28 @@ document.getElementById("round-next-button").addEventListener("click", async () 
   }
   messageEl.textContent = "";
   renderRoom(data);
+});
+
+document.getElementById("room-code-copy").addEventListener("click", async () => {
+  const btn = document.getElementById("room-code-copy");
+  const code = document.getElementById("room-code-display").textContent;
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch (e) {
+    // Clipboard API unavailable (e.g. non-HTTPS context): fall back to a
+    // manual copy via a temporary selectable input.
+    const input = document.createElement("input");
+    input.value = code;
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand("copy");
+    document.body.removeChild(input);
+  }
+  const original = btn.textContent;
+  btn.textContent = "Copié !";
+  setTimeout(() => {
+    btn.textContent = original;
+  }, 1500);
 });
 
 document.getElementById("room-go-upload").addEventListener("click", () => {

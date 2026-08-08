@@ -83,7 +83,10 @@
     </section>
 
     <section id="view-room" class="view" hidden>
-      <h2>Room <span id="room-code-display"></span></h2>
+      <h2>
+        Room <span id="room-code-display"></span>
+        <button type="button" id="room-code-copy">Copier</button>
+      </h2>
       <ul id="room-players-list"></ul>
 
       <div id="room-not-ready-warning" hidden>
@@ -96,7 +99,7 @@
         <form id="room-config-form">
           <label>
             Nombre de rounds
-            <input type="number" id="config-num-rounds" min="3" max="20" value="10" />
+            <input type="number" id="config-num-rounds" min="3" max="60" value="10" />
           </label>
           <label>
             Période : <span id="config-period-label">Tout l'historique</span>
@@ -110,6 +113,22 @@
               <option value="30">30s</option>
               <option value="60">60s</option>
             </select>
+          </label>
+          <label>
+            Points par bonne réponse
+            <input type="number" id="config-points-correct" min="10" max="500" step="5" value="50" />
+          </label>
+          <label>
+            Points par joueur qui ne te trouve pas (bonus auto)
+            <input type="number" id="config-points-owner-miss" min="10" max="500" step="5" value="75" />
+          </label>
+          <label>
+            Multiplicateur de pari
+            <input type="number" id="config-bet-multiplier" min="1" max="5" step="0.1" value="2" />
+          </label>
+          <label>
+            Quota de paris (% du nombre de rounds)
+            <input type="number" id="config-bet-quota" min="0" max="100" step="5" value="30" />
           </label>
           <button type="submit">Mettre à jour la config</button>
         </form>
@@ -130,12 +149,21 @@
 
         <div id="round-owner-view" hidden>
           <p>C'est une de tes vidéos ! Tu gagnes des points bonus pour chaque joueur qui ne te trouve pas — pas besoin de voter sur ton propre round.</p>
+          <div id="owner-bet-section" hidden>
+            <p>Tu peux parier gros : plus de bonus si personne ne te trouve, mais tu perds des points si tout le monde te trouve. (<span id="owner-bet-quota"></span> pari(s) restant(s))</p>
+            <button type="button" id="owner-bet-button">Parier</button>
+          </div>
+          <p id="owner-bet-status" hidden>Pari placé pour ce round — gros gain si personne ne te trouve, perte si tout le monde te trouve.</p>
         </div>
 
         <div id="round-voting" hidden>
           <div id="round-vote-form">
             <p>Qui a liké cette vidéo ? (plusieurs choix possibles, mais si un seul est faux, tout le vote est raté)</p>
             <div id="round-choices"></div>
+            <label id="vote-bet-label">
+              <input type="checkbox" id="vote-bet-checkbox" />
+              Parier que j'ai raison (<span id="vote-bet-quota"></span> pari(s) restant(s), un seul choix seulement)
+            </label>
             <button type="button" id="round-vote-submit">Valider mon vote</button>
           </div>
           <p id="round-waiting-votes" hidden></p>
@@ -155,6 +183,7 @@
       <div id="room-finished" hidden>
         <h3>Partie terminée !</h3>
         <div id="podium"></div>
+        <div id="last-place"></div>
         <ol id="final-scoreboard-rest"></ol>
         <button type="button" id="room-restart-button" hidden>Rejouer</button>
         <p id="room-restart-waiting" hidden>En attente que le chef relance une partie...</p>
